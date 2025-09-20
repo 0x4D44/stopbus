@@ -1,0 +1,16 @@
+ABOUTBOX DIALOG 28, 22, 157, 119
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION "About Nonogram Solver"
+FONT 10, "System"
+BEGIN
+	LTEXT "Copyright \251 M G Davidson - 1994", 551, 34, 24, 109, 9
+	LTEXT "Version 2.2", 554, 34, 34, 76, 9
+	LTEXT "Released: ", 555, 34, 43, 81, 8
+	ICON "ICON_1", -1, 9, 10, 16, 16
+	ICON "ICON_2", -1, 9, 32, 16, 16
+	CTEXT "Text", 552, 8, 77, 142, 8
+	PUSHBUTTON "OK", 1, 53, 102, 50, 14
+	LTEXT "Nonogram Solver", 550, 34, 11, 69, 8
+	CONTROL "This copy is licensed to:", -1, "BUTTON", BS_GROUPBOX | WS_CHILD | WS_VISIBLE, 3, 65, 151, 33
+	CTEXT "Text", 553, 8, 88, 142, 8
+END
