@@ -1,0 +1,94 @@
+STOPBUS.TXT
+===========       
+
+This file is a part of the archive STOPBUS.ZIP which should contain four (4)
+files. They are:
+
+(1)  STOPBUS.TXT  (this file)
+(2)  STOPBUS.EXE  (main executable)
+(3)  STOPBUS.HLP  (help file)
+(4)  CTl3D.DLL    (MicroSoft's 3D library)
+
+To install simply copy these four files into a suitable subdirectory (such
+as C:\STOPBUS). If you are using Windows' Program Manager as a shell the
+following instructions will install the program icon:
+
+1) Select Program Manager using ALT+TAB or by clicking on it.
+2) Double click on the program group that you wish to add the icon to.
+3) Select FILE|NEW... from the main menu.
+4) Ensure that the 'Program item' radio button is selected in the 
+   'New Program Object' dialog.
+5) In the 'Program Item Properties' dialog enter the following information:
+   'Description'= Stop the Bus
+   'Command Line'= C:\STOPBUS\STOPBUS.EXE
+6) Then click on OK. The program icon should now appear in the active group
+   window.
+
+You may wish to move the file CTL3D.DLL to the C:\WINDOWS\SYSTEM
+directory. However be careful not to replace a more modern version of
+this file.
+
+
+About this program
+==================
+
+The author:
+-----------
+
+Stop the Bus is a card game which I originally wrote last summer term
+when I was in second year. Since then it has been debugged a bit and
+has now been dragged out again as a "release" from revison for Finals.
+I am presently working on a version of Estimation Whist and there are
+one or two other things started but not finished. If you want more
+information you can write to me at:
+
+     Martin Davidson
+     Hertford College
+     OXFORD
+     OX1 3BW
+     United Kingdom
+
+or you contact me via the internet:
+
+     u91mgd@uk.ac.oxford.ecs OR
+     u91mgd@ecs.ox.ac.uk	
+
+Both of these addresses will be good until at least July 1995 when I graduate.
+After that who knows???
+
+
+Licencing:
+----------
+
+If you like this program and use it regularily then please send £5 (UK
+Sterling) or $10 (US dollars, cash only) to the address given above.
+
+NOTE: Please do not send cheques drawn on a non UK bank.
+      This is because it costs more than $10 to cash them! Thanks.
+
+
+The following four files make up the archive STOPBUS.ZIP:
+
+      STOPBUS.EXE
+      STOPBUS.HLP
+      STOPBUS.TXT
+      CTL3D.DLL
+
+
+Disclaimer:
+-----------
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+FOR A PARTICULAR PURPOSE. THE ENTIRE RISK AS TO THE
+QUALITY AND PERFORMANCE IS WITH YOU. THE AUTHOR
+ASSUMES NO LIABILITY FOR DAMAGES, DIRECT OR
+CONSEQUENTIAL, WHICH MAY RESULT FROM THE USE OF THIS
+SOFTWARE.
+
+
+====
+End.
+====
+

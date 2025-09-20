@@ -1,0 +1,16 @@
+Stopbus v1.11 for Windows is a card game. The object of the game is to remain 
+playing for as long as possible and you are pitted against three computer
+players who have every intention of stopping you doing so. The game comes
+with a fully functional help file which explains the operation of the game
+in detail. This version replaces v1.1 which didn't (for some strange
+reason) include the CTL3D library. The program and help file now reflect
+this change.
+  
+
+It requires CTL3D, the MicroSoft 3D library which is included.
+
+Uploaded by the author 09/05/94
+
+Regards,
+
+Martin Davidson.
