@@ -3,18 +3,24 @@ use std::iter;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
+use std::mem::size_of;
+use std::ptr::copy_nonoverlapping;
+use std::slice;
+
 use stopbus_core::{DriveReport, GameEvent, GameState, MessageKind, HAND_SIZE};
 use windows::core::{w, Error, Result, PCWSTR};
 use windows::Win32::Foundation::{
     FreeLibrary, BOOL, COLORREF, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, CreateCompatibleDC, CreateSolidBrush, DeleteDC, DeleteObject, EndPaint,
-    FillRect, InvalidateRect, LoadBitmapW, SelectObject, SetBkColor, SetTextColor, StretchBlt,
-    TextOutW, HBITMAP, HDC, PAINTSTRUCT, SRCCOPY,
+    BeginPaint, BitBlt, CreateCompatibleDC, CreateDIBSection, CreateSolidBrush, DeleteDC,
+    DeleteObject, EndPaint, FillRect, InvalidateRect, LoadBitmapW, SelectObject, SetBkColor,
+    SetTextColor, StretchBlt, TextOutW, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    HBITMAP, HDC, PAINTSTRUCT, RGBQUAD, SRCCOPY,
 };
 use windows::Win32::System::LibraryLoader::{
-    GetModuleHandleW, LoadLibraryExW, LOAD_LIBRARY_AS_DATAFILE, LOAD_LIBRARY_AS_IMAGE_RESOURCE,
+    FindResourceW, GetModuleHandleW, LoadLibraryExW, LoadResource, LockResource, SizeofResource,
+    LOAD_LIBRARY_AS_DATAFILE, LOAD_LIBRARY_AS_IMAGE_RESOURCE,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -23,7 +29,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostQuitMessage, RegisterClassExW, SetMenu, SetWindowLongPtrW, ShowWindow, TranslateMessage,
     BS_DEFPUSHBUTTON, BS_PUSHBUTTON, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
     GWLP_USERDATA, HMENU, MB_ICONEXCLAMATION, MB_ICONINFORMATION, MB_OK, MF_POPUP, MF_STRING, MSG,
-    SW_SHOWDEFAULT, WINDOW_EX_STYLE, WINDOW_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY,
+    RT_BITMAP, SW_SHOWDEFAULT, WINDOW_EX_STYLE, WINDOW_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_NCDESTROY, WM_PAINT, WNDCLASSEXW, WS_CAPTION, WS_CHILD,
     WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
 };
@@ -726,14 +732,193 @@ unsafe extern "system" fn window_proc(
 }
 
 unsafe fn load_bitmap(instance: HINSTANCE, id: u16) -> Result<HBITMAP> {
-    let handle = LoadBitmapW(instance, make_int_resource(id));
-    if handle.0.is_null() {
-        Err(Error::from_win32())
-    } else {
-        Ok(handle)
+    match load_bitmap_from_resource(instance, id) {
+        Ok(bitmap) => Ok(bitmap),
+        Err(_) => {
+            let handle = LoadBitmapW(instance, make_int_resource(id));
+            if handle.0.is_null() {
+                Err(Error::from_win32())
+            } else {
+                Ok(handle)
+            }
+        }
     }
 }
 
+unsafe fn load_bitmap_from_resource(instance: HINSTANCE, id: u16) -> Result<HBITMAP> {
+    let resource = FindResourceW(instance, make_int_resource(id), RT_BITMAP);
+    if resource.is_invalid() {
+        return Err(Error::from_win32());
+    }
+
+    let size = SizeofResource(instance, resource);
+    if size == 0 {
+        return Err(Error::from_win32());
+    }
+
+    let handle = LoadResource(instance, resource)?;
+    let data_ptr = LockResource(handle) as *const u8;
+    if data_ptr.is_null() {
+        return Err(Error::from_win32());
+    }
+
+    let data = unsafe { slice::from_raw_parts(data_ptr, size as usize) };
+    create_dib_from_resource(data)
+}
+
+fn create_dib_from_resource(data: &[u8]) -> Result<HBITMAP> {
+    if data.len() < size_of::<BITMAPINFOHEADER>() {
+        return Err(Error::from_win32());
+    }
+
+    let mut header = BITMAPINFOHEADER::default();
+    unsafe {
+        copy_nonoverlapping(
+            data.as_ptr() as *const BITMAPINFOHEADER,
+            &mut header as *mut BITMAPINFOHEADER,
+            1,
+        );
+    }
+
+    if header.biCompression != BI_RGB.0 {
+        return Err(Error::from_win32());
+    }
+
+    let width = header.biWidth as i32;
+    let height = header.biHeight as i32;
+    let abs_height = height.abs() as usize;
+    let bit_count = header.biBitCount as usize;
+
+    if width == 0 || abs_height == 0 || bit_count == 0 {
+        return Err(Error::from_win32());
+    }
+
+    let palette_entries = if bit_count <= 8 {
+        let used = header.biClrUsed as usize;
+        if used != 0 {
+            used
+        } else {
+            1 << bit_count
+        }
+    } else {
+        0
+    };
+
+    let palette_bytes = palette_entries * size_of::<RGBQUAD>();
+    let bits_offset = header.biSize as usize + palette_bytes;
+    if data.len() < bits_offset {
+        return Err(Error::from_win32());
+    }
+
+    let stride = ((width.abs() as usize * bit_count + 31) / 32) * 4;
+    let bits = &data[bits_offset..];
+    if bits.len() < stride * abs_height {
+        return Err(Error::from_win32());
+    }
+
+    let palette = if palette_entries > 0 {
+        &data[header.biSize as usize..header.biSize as usize + palette_bytes]
+    } else {
+        &[]
+    };
+
+    let width_usize = width.abs() as usize;
+    let mut output = vec![0u8; abs_height * width_usize * 4];
+
+    for row in 0..abs_height {
+        let src_row = if height > 0 {
+            abs_height - 1 - row
+        } else {
+            row
+        };
+        let row_data = &bits[src_row * stride..(src_row + 1) * stride];
+        for col in 0..width_usize {
+            let (b, g, r, a) = match bit_count {
+                1 => {
+                    let byte = row_data[col / 8];
+                    let mask = 0x80 >> (col % 8);
+                    let idx = if byte & mask == 0 { 0 } else { 1 };
+                    let base = idx * 4;
+                    (
+                        palette.get(base).copied().unwrap_or(0),
+                        palette.get(base + 1).copied().unwrap_or(0),
+                        palette.get(base + 2).copied().unwrap_or(0),
+                        0xFF,
+                    )
+                }
+                4 => {
+                    let byte = row_data[col / 2];
+                    let idx = if col % 2 == 0 {
+                        (byte >> 4) as usize
+                    } else {
+                        (byte & 0x0F) as usize
+                    };
+                    let base = idx * 4;
+                    (
+                        palette.get(base).copied().unwrap_or(0),
+                        palette.get(base + 1).copied().unwrap_or(0),
+                        palette.get(base + 2).copied().unwrap_or(0),
+                        0xFF,
+                    )
+                }
+                8 => {
+                    let idx = row_data[col] as usize;
+                    let base = idx * 4;
+                    (
+                        palette.get(base).copied().unwrap_or(0),
+                        palette.get(base + 1).copied().unwrap_or(0),
+                        palette.get(base + 2).copied().unwrap_or(0),
+                        0xFF,
+                    )
+                }
+                24 => {
+                    let base = col * 3;
+                    (row_data[base], row_data[base + 1], row_data[base + 2], 0xFF)
+                }
+                32 => {
+                    let base = col * 4;
+                    (
+                        row_data[base],
+                        row_data[base + 1],
+                        row_data[base + 2],
+                        row_data[base + 3],
+                    )
+                }
+                _ => return Err(Error::from_win32()),
+            };
+
+            let dest_index = (row * width_usize + col) * 4;
+            output[dest_index] = b;
+            output[dest_index + 1] = g;
+            output[dest_index + 2] = r;
+            output[dest_index + 3] = a;
+        }
+    }
+
+    let mut info = BITMAPINFOHEADER::default();
+    info.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+    info.biWidth = width;
+    info.biHeight = -(abs_height as i32);
+    info.biPlanes = 1;
+    info.biBitCount = 32;
+    info.biCompression = BI_RGB.0;
+    info.biSizeImage = output.len() as u32;
+
+    let mut bmi = BITMAPINFO {
+        bmiHeader: info,
+        bmiColors: [RGBQUAD::default(); 1],
+    };
+
+    let mut bits_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+    let bitmap =
+        unsafe { CreateDIBSection(None, &mut bmi, DIB_RGB_COLORS, &mut bits_ptr, None, 0)? };
+
+    unsafe {
+        copy_nonoverlapping(output.as_ptr(), bits_ptr as *mut u8, output.len());
+    }
+
+    Ok(bitmap)
+}
 fn show_info(hwnd: HWND, message: &str) {
     let text = wide_string(message);
     let title = wide_string("Stop the Bus");
