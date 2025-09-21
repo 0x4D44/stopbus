@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "crates/stopbus-core",
+    "crates/stopbus-ui"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+
