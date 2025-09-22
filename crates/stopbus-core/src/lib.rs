@@ -4,6 +4,12 @@ use rand::{Rng, SeedableRng};
 pub type CardId = u8;
 pub const DECK_SIZE: usize = 52;
 pub const PLAYERS: usize = 4;
+
+struct LifeLossInfo {
+    player: usize,
+    knocked_out: bool,
+}
+
 pub const HAND_SIZE: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -319,7 +325,7 @@ impl GameState {
         }
     }
 
-    fn start_round_internal(&mut self, events: &mut Vec<GameEvent>) {
+    fn start_round_internal(&mut self, _events: &mut Vec<GameEvent>) {
         self.stop_player = None;
         self.stick_player = None;
         self.finished = false;
@@ -335,7 +341,6 @@ impl GameState {
             self.next_start_candidate = start;
             self.current_player = start;
             self.round_start_player = start;
-            events.push(GameEvent::info(format!("Player {} to start", start + 1)));
         } else {
             self.current_player = 0;
             self.round_start_player = 0;
@@ -388,6 +393,22 @@ impl GameState {
                     winner,
                     draw,
                 };
+            }
+
+            if let Some(stick) = self.stick_player {
+                if self.current_player == stick {
+                    match self.finish_round(&mut events) {
+                        FinishResult::Continue => continue,
+                        FinishResult::GameOver { winner, draw } => {
+                            return DriveReport {
+                                events,
+                                awaiting_human: false,
+                                winner,
+                                draw,
+                            };
+                        }
+                    }
+                }
             }
 
             if self.current_player == 0 {
@@ -451,22 +472,6 @@ impl GameState {
                     }
                 }
             }
-
-            if let Some(stick) = self.stick_player {
-                if self.current_player == stick {
-                    match self.finish_round(&mut events) {
-                        FinishResult::Continue => continue,
-                        FinishResult::GameOver { winner, draw } => {
-                            return DriveReport {
-                                events,
-                                awaiting_human: false,
-                                winner,
-                                draw,
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -496,16 +501,19 @@ impl GameState {
     fn finish_round(&mut self, events: &mut Vec<GameEvent>) -> FinishResult {
         self.update_round_scores();
 
-        if let Some(stop_player) = self.stop_player {
+        let mut life_losses: Vec<LifeLossInfo> = Vec::new();
+        let stop_player = self.stop_player;
+
+        if let Some(stopper) = stop_player {
             for player in 0..PLAYERS {
-                if player != stop_player && self.lives[player] > 0 {
-                    self.decrement_life(player, events);
+                if player != stopper && self.lives[player] > 0 {
+                    self.decrement_life(player, &mut life_losses);
                 }
             }
         } else if let Some(lowest) = self.lowest_alive_score() {
             for player in 0..PLAYERS {
                 if self.lives[player] > 0 && self.round_scores[player] == lowest {
-                    self.decrement_life(player, events);
+                    self.decrement_life(player, &mut life_losses);
                 }
             }
         }
@@ -517,14 +525,44 @@ impl GameState {
         self.human_can_stick = false;
         self.human_old_stack_card = None;
 
+        let loss_players: Vec<usize> = life_losses.iter().map(|info| info.player).collect();
+        let knockout_players: Vec<usize> = life_losses
+            .iter()
+            .filter(|info| info.knocked_out)
+            .map(|info| info.player)
+            .collect();
+        let human_lost = loss_players.contains(&0);
+        let human_knocked_out = knockout_players.contains(&0);
+
+        let mut summary_sentences = Vec::new();
+        let alert_needed = stop_player == Some(0) || human_lost || human_knocked_out;
+
+        if let Some(stopper) = stop_player {
+            let stopper_sentence = if stopper == 0 {
+                "You stopped the bus.".to_string()
+            } else {
+                format!("{} stopped the bus.", self.player_name(stopper))
+            };
+            summary_sentences.push(stopper_sentence);
+        }
+
+        if !loss_players.is_empty() {
+            summary_sentences.push(self.loss_sentence(&loss_players));
+        }
+
+        for player in knockout_players {
+            summary_sentences.push(self.knockout_sentence(player));
+        }
+
         let alive = self.alive_players();
+
         match alive.len() {
             0 => {
-                events.push(GameEvent::alert("A draw is declared.".to_string()));
-                events.push(GameEvent::info(
-                    "That was a rare message - well done!".to_string(),
-                ));
+                summary_sentences.push("A draw is declared.".to_string());
+                summary_sentences.push("That was a rare message - well done!".to_string());
                 self.finished = true;
+                let text = summary_sentences.join("\n");
+                events.push(GameEvent::alert(text));
                 FinishResult::GameOver {
                     winner: None,
                     draw: true,
@@ -532,53 +570,97 @@ impl GameState {
             }
             1 => {
                 let winner = alive[0];
-                let message = if winner == 0 {
+                let winner_sentence = if winner == 0 {
                     "Congratulations - you've won!".to_string()
                 } else {
-                    format!("Player {} has won.", winner + 1)
+                    format!("{} has won.", self.player_name(winner))
                 };
-                events.push(GameEvent::info(message));
+                summary_sentences.push(winner_sentence);
                 self.finished = true;
+                let text = summary_sentences.join("\n");
+                let event = if alert_needed {
+                    GameEvent::alert(text)
+                } else {
+                    GameEvent::info(text)
+                };
+                events.push(event);
                 FinishResult::GameOver {
                     winner: Some(winner),
                     draw: false,
                 }
             }
             _ => {
+                if !summary_sentences.is_empty() {
+                    let text = summary_sentences.join("\n");
+                    let event = if alert_needed {
+                        GameEvent::alert(text)
+                    } else {
+                        GameEvent::info(text)
+                    };
+                    events.push(event);
+                }
                 self.start_round_internal(events);
                 FinishResult::Continue
             }
         }
     }
 
-    fn decrement_life(&mut self, player: usize, events: &mut Vec<GameEvent>) {
+    fn player_name(&self, player: usize) -> String {
+        if player == 0 {
+            "You".to_string()
+        } else {
+            format!("Player {}", player + 1)
+        }
+    }
+
+    fn join_name_list(names: &[String]) -> String {
+        match names.len() {
+            0 => String::new(),
+            1 => names[0].clone(),
+            2 => format!("{} and {}", names[0], names[1]),
+            _ => {
+                let mut result = names[..names.len() - 1].join(", ");
+                result.push_str(", and ");
+                result.push_str(&names[names.len() - 1]);
+                result
+            }
+        }
+    }
+
+    fn loss_sentence(&self, players: &[usize]) -> String {
+        let names: Vec<String> = players.iter().map(|&p| self.player_name(p)).collect();
+
+        if names.is_empty() {
+            return String::new();
+        }
+
+        if players.len() == 1 && players[0] == 0 {
+            "You lost a life.".to_string()
+        } else {
+            format!("{} lost a life.", Self::join_name_list(&names))
+        }
+    }
+
+    fn knockout_sentence(&self, player: usize) -> String {
+        if player == 0 {
+            "You have been knocked out.".to_string()
+        } else {
+            format!("{} has been knocked out.", self.player_name(player))
+        }
+    }
+
+    fn decrement_life(&mut self, player: usize, losses: &mut Vec<LifeLossInfo>) {
         if self.lives[player] == 0 {
             return;
         }
 
         self.lives[player] = self.lives[player].saturating_sub(1);
 
-        if player == 0 {
-            events.push(GameEvent::alert("You've lost a life!".to_string()));
-        } else {
-            events.push(GameEvent::info(format!(
-                "Player {} lost a life.",
-                player + 1
-            )));
-        }
-
-        if self.lives[player] == 0 {
-            if player == 0 {
-                events.push(GameEvent::alert(
-                    "Unfortunately you've been knocked out!".to_string(),
-                ));
-            } else {
-                events.push(GameEvent::info(format!(
-                    "Player {} has no lives left.",
-                    player + 1
-                )));
-            }
-        }
+        let knocked_out = self.lives[player] == 0;
+        losses.push(LifeLossInfo {
+            player,
+            knocked_out,
+        });
     }
 
     fn execute_auto_turn(&mut self, player: usize, events: &mut Vec<GameEvent>) {

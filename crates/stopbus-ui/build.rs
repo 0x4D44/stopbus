@@ -32,6 +32,10 @@ fn main() {
         "cargo:rerun-if-changed={}",
         Path::new("../../MD.ICO").display()
     );
+    println!(
+        "cargo:rerun-if-changed={}",
+        Path::new("../../assets/original-icons/icon_001.ico").display()
+    );
 }
 
 fn assert_modern_bitmap(path: &Path) {
