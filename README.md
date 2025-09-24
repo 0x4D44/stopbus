@@ -1,6 +1,6 @@
 # Stop the Bus (Preservation + Modernization)
 
-This repository preserves Martin Davidson's 1994 Windows card game and hosts a Rust/windows-rs rewrite.
+This repository preserves a 1993 Windows card game and hosts a Rust/windows-rs rewrite.
 
 ## Repository Layout
 - Legacy Pascal sources and resources: `STOPBUS.PAS`, `CTL3D.PAS`, `ABOUT.RC`, `RESOURCE.BAT`.
@@ -22,7 +22,7 @@ This repository preserves Martin Davidson's 1994 Windows card game and hosts a R
 - Contributor practices and testing expectations are summarized in `AGENTS.md`.
 
 ## Licensing & Attribution
-The modernization code will be published under MIT (see `Cargo.toml`). The original shareware materials remain (c) Martin G Davidson; retain the shareware notice in redistributed legacy packages.
+The modernization code is published under MIT (see `Cargo.toml`). 
 
 
 

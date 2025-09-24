@@ -2,7 +2,12 @@
 ; Build with: iscc installers\StopTheBus.iss
 
 #define MyAppName "Stop The Bus"
-#define MyAppVersion "2.0.0"
+#define AppVersionEnv GetEnv("STOPBUS_APP_VERSION")
+#if AppVersionEnv != ""
+  #define MyAppVersion AppVersionEnv
+#else
+  #define MyAppVersion "2.0.0"
+#endif
 #define MyAppPublisher "Stop The Bus Modernization Team"
 #define MyAppExeName "stopbus.exe"
 
@@ -16,7 +21,7 @@ DefaultGroupName={#MyAppName}
 DisableDirPage=no
 DisableProgramGroupPage=no
 OutputBaseFilename=StopTheBus-{#MyAppVersion}-Setup
-OutputDir=..\RELEASE
+OutputDir=..\target\installer
 Compression=lzma
 SolidCompression=yes
 ArchitecturesAllowed=x64
@@ -30,9 +35,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-Source: "target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "RELEASE\STOPBUS.TXT"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
-Source: "HELP\STOPBUS.HLP"; DestDir: "{app}\help"; Flags: ignoreversion
+Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\RELEASE\STOPBUS.TXT"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
+Source: "..\HELP\STOPBUS.HLP"; DestDir: "{app}\help"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

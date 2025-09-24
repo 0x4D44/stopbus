@@ -180,13 +180,14 @@ impl GameState {
         let mut events = Vec::new();
         match self.finish_round(&mut events) {
             FinishResult::Continue => {
-                return DriveReport {
+                self.pending_new_round = true;
+                DriveReport {
                     events,
                     awaiting_human: false,
                     winner: None,
                     draw: false,
                     turn_sequence: Vec::new(),
-                };
+                }
             }
             FinishResult::GameOver { winner, draw } => DriveReport {
                 events,
@@ -347,7 +348,7 @@ impl GameState {
         }
     }
 
-    fn start_round_internal(&mut self, _events: &mut Vec<GameEvent>) {
+    fn start_round_internal(&mut self, _events: &mut [GameEvent]) {
         self.stop_player = None;
         self.stick_player = None;
         self.stick_player_score = None;
@@ -769,7 +770,7 @@ impl GameState {
         self.complete_turn();
     }
 
-    fn mark_player_sticking(&mut self, player: usize, _events: &mut Vec<GameEvent>) {
+    fn mark_player_sticking(&mut self, player: usize, _events: &mut [GameEvent]) {
         self.update_round_scores();
         let score = self.round_scores[player];
         if !self.can_player_stick(player, score) {
@@ -794,7 +795,7 @@ impl GameState {
         let mut best_score = base_score;
 
         for slot in 0..HAND_SIZE {
-            if let Some(_) = self.hands[player][slot] {
+            if self.hands[player][slot].is_some() {
                 let mut temp = self.hands[player];
                 temp[slot] = Some(stack_card);
                 let score = hand_max_score(&temp);
@@ -970,7 +971,7 @@ pub fn card_suit(card: CardId) -> Option<Suit> {
 pub fn card_points(card: CardId) -> u8 {
     match card_rank(card).unwrap_or(0) {
         1 => 11,
-        11 | 12 | 13 => 10,
+        11..=13 => 10,
         value => value,
     }
 }

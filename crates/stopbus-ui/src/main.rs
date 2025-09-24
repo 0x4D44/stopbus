@@ -407,7 +407,7 @@ impl WindowState {
             return;
         }
 
-        self.pending_turns.extend(turns.into_iter());
+        self.pending_turns.extend(turns);
 
         if !self.turn_timer_active {
             self.start_turn_animation(hwnd);
@@ -1378,7 +1378,7 @@ unsafe extern "system" fn window_proc(
         }
 
         WM_COMMAND => {
-            let command = (wparam.0 & 0xFFFF) as usize;
+            let command = wparam.0 & 0xFFFF;
 
             match command {
                 CM_GAME_DEAL | ID_DEAL_BUTTON => {
@@ -1599,7 +1599,7 @@ unsafe extern "system" fn options_dialog_proc(
 ) -> isize {
     match message {
         WM_INITDIALOG => {
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0 as isize);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0);
 
             let state_ptr = lparam.0 as *mut WindowState;
 
@@ -1834,7 +1834,7 @@ fn create_cheat_window(
 
     size: (i32, i32),
 ) -> Result<HWND> {
-    let owner = state.main_hwnd.unwrap_or(HWND::default());
+    let owner = state.main_hwnd.unwrap_or_default();
 
     let hwnd = unsafe {
         CreateWindowExW(
@@ -2298,11 +2298,11 @@ fn create_dib_from_resource(data: &[u8]) -> Result<HBITMAP> {
         return Err(Error::from_win32());
     }
 
-    let width = header.biWidth as i32;
+    let width = header.biWidth;
 
-    let height = header.biHeight as i32;
+    let height = header.biHeight;
 
-    let abs_height = height.abs() as usize;
+    let abs_height = height.unsigned_abs() as usize;
 
     let bit_count = header.biBitCount as usize;
 
@@ -2330,7 +2330,7 @@ fn create_dib_from_resource(data: &[u8]) -> Result<HBITMAP> {
         return Err(Error::from_win32());
     }
 
-    let stride = ((width.abs() as usize * bit_count + 31) / 32) * 4;
+    let stride = ((width.unsigned_abs() as usize * bit_count + 31) / 32) * 4;
 
     let bits = &data[bits_offset..];
 
@@ -2344,7 +2344,7 @@ fn create_dib_from_resource(data: &[u8]) -> Result<HBITMAP> {
         &[]
     };
 
-    let width_usize = width.abs() as usize;
+    let width_usize = width.unsigned_abs() as usize;
 
     let mut output = vec![0u8; abs_height * width_usize * 4];
 
@@ -2440,32 +2440,25 @@ fn create_dib_from_resource(data: &[u8]) -> Result<HBITMAP> {
         }
     }
 
-    let mut info = BITMAPINFOHEADER::default();
+    let info = BITMAPINFOHEADER {
+        biSize: size_of::<BITMAPINFOHEADER>() as u32,
+        biWidth: width,
+        biHeight: -(abs_height as i32),
+        biPlanes: 1,
+        biBitCount: 32,
+        biCompression: BI_RGB.0,
+        biSizeImage: output.len() as u32,
+        ..Default::default()
+    };
 
-    info.biSize = size_of::<BITMAPINFOHEADER>() as u32;
-
-    info.biWidth = width;
-
-    info.biHeight = -(abs_height as i32);
-
-    info.biPlanes = 1;
-
-    info.biBitCount = 32;
-
-    info.biCompression = BI_RGB.0;
-
-    info.biSizeImage = output.len() as u32;
-
-    let mut bmi = BITMAPINFO {
+    let bmi = BITMAPINFO {
         bmiHeader: info,
-
         bmiColors: [RGBQUAD::default(); 1],
     };
 
     let mut bits_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
 
-    let bitmap =
-        unsafe { CreateDIBSection(None, &mut bmi, DIB_RGB_COLORS, &mut bits_ptr, None, 0)? };
+    let bitmap = unsafe { CreateDIBSection(None, &bmi, DIB_RGB_COLORS, &mut bits_ptr, None, 0)? };
 
     unsafe {
         copy_nonoverlapping(output.as_ptr(), bits_ptr as *mut u8, output.len());
