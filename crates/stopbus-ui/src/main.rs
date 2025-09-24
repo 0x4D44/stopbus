@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::ffi::c_void;
 
 use std::collections::VecDeque;
