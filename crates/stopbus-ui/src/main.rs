@@ -1,5 +1,7 @@
 use std::ffi::c_void;
 
+use std::collections::VecDeque;
+
 use std::iter;
 
 use std::os::windows::ffi::OsStrExt;
@@ -42,22 +44,25 @@ use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateMenu, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyWindow,
     DialogBoxParamW, DispatchMessageW, EndDialog, GetClientRect, GetMessageW, GetWindowLongPtrW,
-    GetWindowRect, IsWindowVisible, LoadCursorW, LoadIconW, MessageBoxW, PostMessageW,
-    PostQuitMessage, RegisterClassExW, SendDlgItemMessageW, SetDlgItemTextW, SetMenu,
-    SetWindowLongPtrW, ShowWindow, TranslateMessage, BM_GETCHECK, BM_SETCHECK, BS_DEFPUSHBUTTON,
-    BS_PUSHBUTTON, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HICON,
-    HMENU, IDCANCEL, IDOK, MB_ICONEXCLAMATION, MB_ICONINFORMATION, MB_OK, MF_POPUP, MF_STRING, MSG,
-    RT_BITMAP, SW_SHOWDEFAULT, WINDOW_EX_STYLE, WINDOW_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY,
-    WM_INITDIALOG, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOVE, WM_NCDESTROY, WM_PAINT, WNDCLASSEXW,
-    WNDPROC, WS_CAPTION, WS_CHILD, WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP,
-    WS_SYSMENU, WS_VISIBLE,
+    GetWindowRect, IsWindowVisible, KillTimer, LoadCursorW, LoadIconW, MessageBoxW, PostMessageW,
+    PostQuitMessage, RegisterClassExW, SendDlgItemMessageW, SetDlgItemTextW, SetMenu, SetTimer,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, BM_GETCHECK, BM_SETCHECK,
+    BS_DEFPUSHBUTTON, BS_PUSHBUTTON, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
+    GWLP_USERDATA, HICON, HMENU, IDCANCEL, IDOK, MB_ICONEXCLAMATION, MB_ICONINFORMATION, MB_OK,
+    MF_POPUP, MF_STRING, MSG, RT_BITMAP, SWP_NOSIZE, SWP_NOZORDER, SW_SHOWDEFAULT, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_INITDIALOG, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOVE, WM_NCDESTROY, WM_PAINT, WM_TIMER, WNDCLASSEXW, WNDPROC, WS_CAPTION, WS_CHILD,
+    WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU, WS_VISIBLE,
 };
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("StopBusMainWindow");
 
-const WINDOW_TITLE: PCWSTR = w!("Stop the Bus (Rust modernization)");
+const WINDOW_TITLE: PCWSTR = w!("Stop The Bus");
 
 const WM_APP_START: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
+
+const TURN_TIMER_ID: usize = 1;
+const TURN_TIMER_INTERVAL_MS: u32 = 500;
 
 const LEGACY_RES_PATH: &str = "STOPBUS.RES";
 
@@ -203,8 +208,6 @@ const CM_GAME_EXIT: usize = 102;
 
 const CM_HELP_CONTENTS: usize = 900;
 
-const CM_HELP_USING: usize = 901;
-
 const CM_HELP_ABOUT: usize = 999;
 
 const ID_STICK_BUTTON: usize = 1000;
@@ -265,6 +268,14 @@ struct WindowState {
     pending_card: Option<usize>,
 
     stack_pressed: bool,
+
+    pending_turns: VecDeque<usize>,
+
+    turn_indicator_override: Option<usize>,
+
+    turn_timer_active: bool,
+
+    automation_pending: bool,
 }
 
 impl WindowState {
@@ -341,6 +352,14 @@ impl WindowState {
             pending_card: None,
 
             stack_pressed: false,
+
+            pending_turns: VecDeque::new(),
+
+            turn_indicator_override: None,
+
+            turn_timer_active: false,
+
+            automation_pending: false,
         };
 
         state.load_persisted_cheat_settings();
@@ -359,11 +378,84 @@ impl WindowState {
 
         self.update_button_states(&report);
 
+        self.automation_pending = !report.awaiting_human && !report.game_over();
+
+        Self::request_repaint(hwnd);
+
+        self.update_cheat_windows();
+
+        if report.turn_sequence.is_empty() {
+            if self.automation_pending {
+                self.automation_pending = false;
+                let next_report = self.game.continue_automation();
+                self.process_report(hwnd, next_report);
+            }
+            return;
+        }
+
+        self.enqueue_turn_animation(hwnd, report.turn_sequence.clone());
+    }
+
+    fn request_repaint(hwnd: HWND) {
         unsafe {
             let _ = InvalidateRect(hwnd, None, BOOL(1));
         }
+    }
 
-        self.update_cheat_windows();
+    fn enqueue_turn_animation(&mut self, hwnd: HWND, turns: Vec<usize>) {
+        if turns.is_empty() {
+            return;
+        }
+
+        self.pending_turns.extend(turns.into_iter());
+
+        if !self.turn_timer_active {
+            self.start_turn_animation(hwnd);
+        }
+    }
+
+    fn start_turn_animation(&mut self, hwnd: HWND) {
+        if self.pending_turns.is_empty() {
+            return;
+        }
+
+        self.turn_timer_active = true;
+
+        unsafe {
+            let _ = SetTimer(hwnd, TURN_TIMER_ID, TURN_TIMER_INTERVAL_MS, None);
+        }
+
+        self.advance_turn_animation(hwnd);
+    }
+
+    fn advance_turn_animation(&mut self, hwnd: HWND) {
+        if let Some(next_player) = self.pending_turns.pop_front() {
+            self.turn_indicator_override = Some(next_player);
+            Self::request_repaint(hwnd);
+        } else {
+            self.stop_turn_animation(hwnd);
+        }
+    }
+
+    fn stop_turn_animation(&mut self, hwnd: HWND) {
+        if self.turn_timer_active {
+            unsafe {
+                let _ = KillTimer(hwnd, TURN_TIMER_ID);
+            }
+            self.turn_timer_active = false;
+        }
+
+        self.pending_turns.clear();
+
+        if self.turn_indicator_override.take().is_some() {
+            Self::request_repaint(hwnd);
+        }
+
+        if self.automation_pending {
+            self.automation_pending = false;
+            let report = self.game.continue_automation();
+            self.process_report(hwnd, report);
+        }
     }
 
     fn update_button_states(&mut self, report: &DriveReport) {
@@ -525,7 +617,10 @@ impl WindowState {
             &start_label,
         );
 
-        let arrow_y = POINTER_BASE_Y + PLAYER_LABEL_STEP * (self.game.current_player() as i32 + 1);
+        let pointer_player = self
+            .turn_indicator_override
+            .unwrap_or_else(|| self.game.current_player());
+        let arrow_y = POINTER_BASE_Y + PLAYER_LABEL_STEP * (pointer_player as i32 + 1);
 
         draw_text(hdc, POINTER_X, arrow_y, " ->");
 
@@ -695,6 +790,51 @@ impl WindowState {
                 if let Some(pos) = window_screen_position(hwnd) {
                     self.cheat_scores_pos = pos;
                 }
+            }
+        }
+    }
+
+    fn offset_cheat_windows(&mut self, dx: i32, dy: i32) {
+        if dx == 0 && dy == 0 {
+            return;
+        }
+
+        Self::offset_single_cheat_window(
+            self.cheat_cards_window,
+            &mut self.cheat_cards_pos,
+            dx,
+            dy,
+        );
+        Self::offset_single_cheat_window(
+            self.cheat_stack_window,
+            &mut self.cheat_stack_pos,
+            dx,
+            dy,
+        );
+        Self::offset_single_cheat_window(
+            self.cheat_scores_window,
+            &mut self.cheat_scores_pos,
+            dx,
+            dy,
+        );
+    }
+
+    fn offset_single_cheat_window(window: Option<HWND>, pos: &mut (i32, i32), dx: i32, dy: i32) {
+        let new_x = pos.0.saturating_add(dx);
+        let new_y = pos.1.saturating_add(dy);
+        *pos = (new_x, new_y);
+
+        if let Some(hwnd) = window {
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    HWND::default(),
+                    new_x,
+                    new_y,
+                    0,
+                    0,
+                    SWP_NOZORDER | SWP_NOSIZE,
+                );
             }
         }
     }
@@ -1198,10 +1338,40 @@ unsafe extern "system" fn window_proc(
         WM_MOVE => {
             if let Some(state) = window_state_mut(hwnd) {
                 if let Some(pos) = unsafe { window_screen_position(hwnd) } {
+                    if let Some(previous) = state.main_window_pos {
+                        let dx = pos.0 - previous.0;
+                        let dy = pos.1 - previous.1;
+
+                        if dx != 0 || dy != 0 {
+                            state.offset_cheat_windows(dx, dy);
+                        }
+                    }
+
                     state.main_window_pos = Some(pos);
 
                     state.persist_cheat_settings();
                 }
+            }
+
+            LRESULT(0)
+        }
+
+        WM_TIMER => {
+            if wparam.0 == TURN_TIMER_ID {
+                if let Some(state) = window_state_mut(hwnd) {
+                    state.advance_turn_animation(hwnd);
+                }
+                return LRESULT(0);
+            }
+
+            DefWindowProcW(hwnd, message, wparam, lparam)
+        }
+
+        WM_APP_START => {
+            if let Some(state) = window_state_mut(hwnd) {
+                let report = state.game.start_fresh();
+
+                state.process_report(hwnd, report);
             }
 
             LRESULT(0)
@@ -1267,17 +1437,20 @@ unsafe extern "system" fn window_proc(
                     LRESULT(0)
                 }
 
-                CM_HELP_CONTENTS | CM_HELP_USING => {
-                    show_info(
-                        hwnd,
-                        match command {
-                            CM_HELP_CONTENTS => "Help contents will migrate from WinHelp soon.",
-
-                            CM_HELP_USING => "Using Help placeholder.",
-
-                            _ => "",
-                        },
+                CM_HELP_CONTENTS => {
+                    let summary = concat!(
+                        "Stop The Bus is a four-player race to build the strongest suited hand.\n\n",
+                        "On your turn, draw the face-up stack card or peek the facedown deck, ",
+                        "swap a card to improve your total, then press OK to finish.\n\n",
+                        "Scoring counts the best suited trio: aces are worth 11, court cards score 10, ",
+                        "others use pip value. Hitting 31 lets you Stop the Bus immediately.\n\n",
+                        "Stick to freeze the round. Each rival takes one final turn to beat you; ",
+                        "afterward the lowest score loses a life. Lose three lives and you're out.\n\n",
+                        "Use Options to toggle cheat windows that reveal hands, the stack, or live ",
+                        "scores while testing the modernization build.\n",
                     );
+
+                    show_info(hwnd, summary);
 
                     LRESULT(0)
                 }
@@ -1363,6 +1536,10 @@ unsafe extern "system" fn window_proc(
         }
 
         WM_DESTROY => {
+            if let Some(state) = window_state_mut(hwnd) {
+                state.stop_turn_animation(hwnd);
+            }
+
             PostQuitMessage(0);
 
             LRESULT(0)
@@ -1495,7 +1672,7 @@ unsafe extern "system" fn about_dialog_proc(
             let _ = SetDlgItemTextW(
                 hwnd,
                 ID_ABOUT_COPYRIGHT,
-                PCWSTR(wide_string("Copyright (c) Martin Davidson - 1994").as_ptr()),
+                PCWSTR(wide_string("Copyright (c) Martin Davidson - 1993-2025").as_ptr()),
             );
 
             let _ = SetDlgItemTextW(
@@ -2341,8 +2518,6 @@ unsafe fn create_menus(hwnd: HWND) -> Result<()> {
     AppendMenuW(game_menu, MF_STRING, CM_GAME_EXIT, w!("E&xit"))?;
 
     AppendMenuW(help_menu, MF_STRING, CM_HELP_CONTENTS, w!("&Contents"))?;
-
-    AppendMenuW(help_menu, MF_STRING, CM_HELP_USING, w!("Using &Help"))?;
 
     AppendMenuW(help_menu, MF_STRING, CM_HELP_ABOUT, w!("&About"))?;
 

@@ -54,6 +54,7 @@ pub struct DriveReport {
     pub awaiting_human: bool,
     pub winner: Option<usize>,
     pub draw: bool,
+    pub turn_sequence: Vec<usize>,
 }
 
 impl DriveReport {
@@ -72,7 +73,10 @@ pub struct GameState {
     rng: StdRng,
     current_player: usize,
     round_start_player: usize,
+    round_turns: u16,
     stick_player: Option<usize>,
+    stick_player_score: Option<u8>,
+    pending_new_round: bool,
     stop_player: Option<usize>,
     next_start_candidate: usize,
     finished: bool,
@@ -99,7 +103,10 @@ impl GameState {
             rng,
             current_player: 0,
             round_start_player: 0,
+            round_turns: 0,
             stick_player: None,
+            stick_player_score: None,
+            pending_new_round: false,
             stop_player: None,
             next_start_candidate: PLAYERS - 1,
             finished: false,
@@ -120,9 +127,12 @@ impl GameState {
         self.hands = [[None; HAND_SIZE]; PLAYERS];
         self.stack_index = 0;
         self.stick_player = None;
+        self.stick_player_score = None;
+        self.pending_new_round = false;
         self.stop_player = None;
         self.current_player = 0;
         self.round_start_player = 0;
+        self.round_turns = 0;
         self.next_start_candidate = PLAYERS - 1;
         self.finished = false;
         self.awaiting_human = false;
@@ -143,7 +153,7 @@ impl GameState {
     pub fn start_new_round(&mut self) -> DriveReport {
         let mut events = Vec::new();
         self.start_round_internal(&mut events);
-        self.drive_round_internal(events)
+        self.drive_round_step(events)
     }
 
     /// Advances the game after the human has completed their turn.
@@ -156,33 +166,40 @@ impl GameState {
                 awaiting_human: false,
                 winner: alive.first().copied(),
                 draw: alive.is_empty(),
+                turn_sequence: Vec::new(),
             };
         }
 
         self.end_human_turn();
 
-        if self.current_player != 0 {
-            return self.drive_round_internal(Vec::new());
-        }
-
         if let Some(next) = self.next_alive_after(0) {
             self.current_player = next;
-            return self.drive_round_internal(Vec::new());
+            return self.drive_round_step(Vec::new());
         }
 
         let mut events = Vec::new();
         match self.finish_round(&mut events) {
-            FinishResult::Continue => self.drive_round_internal(events),
-            FinishResult::GameOver { winner, draw } => {
-                self.awaiting_human = false;
-                DriveReport {
+            FinishResult::Continue => {
+                return DriveReport {
                     events,
                     awaiting_human: false,
-                    winner,
-                    draw,
-                }
+                    winner: None,
+                    draw: false,
+                    turn_sequence: Vec::new(),
+                };
             }
+            FinishResult::GameOver { winner, draw } => DriveReport {
+                events,
+                awaiting_human: false,
+                winner,
+                draw,
+                turn_sequence: Vec::new(),
+            },
         }
+    }
+
+    pub fn continue_automation(&mut self) -> DriveReport {
+        self.drive_round_step(Vec::new())
     }
 
     /// Attempts to mark the supplied player as sticking for the remainder of the round.
@@ -191,7 +208,10 @@ impl GameState {
             return false;
         }
 
+        self.update_round_scores();
+        let score = self.round_scores[player];
         self.stick_player = Some(player);
+        self.stick_player_score = Some(score);
         true
     }
 
@@ -283,10 +303,10 @@ impl GameState {
         self.update_round_scores();
 
         let stack_matches_old = self.human_old_stack_card == Some(self.deck[self.stack_index]);
-        self.human_can_stick = stack_matches_old && self.stick_player.is_none();
         if !stack_matches_old {
             self.human_can_draw_next = false;
         }
+        self.refresh_human_stick_flag();
 
         Some(self.idle_report())
     }
@@ -306,6 +326,7 @@ impl GameState {
                 awaiting_human: true,
                 winner: None,
                 draw: false,
+                turn_sequence: Vec::new(),
             });
         }
 
@@ -322,18 +343,22 @@ impl GameState {
             awaiting_human: self.awaiting_human,
             winner: None,
             draw: false,
+            turn_sequence: Vec::new(),
         }
     }
 
     fn start_round_internal(&mut self, _events: &mut Vec<GameEvent>) {
         self.stop_player = None;
         self.stick_player = None;
+        self.stick_player_score = None;
         self.finished = false;
         self.awaiting_human = false;
         self.human_can_draw_next = false;
         self.human_can_stick = false;
         self.human_old_stack_card = None;
+        self.pending_new_round = false;
         self.round_scores = [0; PLAYERS];
+        self.round_turns = 0;
 
         self.deal_round();
 
@@ -351,7 +376,7 @@ impl GameState {
         self.awaiting_human = true;
         self.human_can_draw_next = true;
         self.human_old_stack_card = self.current_stack_card();
-        self.human_can_stick = self.stick_player.is_none();
+        self.refresh_human_stick_flag();
     }
 
     fn end_human_turn(&mut self) {
@@ -359,22 +384,37 @@ impl GameState {
         self.human_can_draw_next = false;
         self.human_can_stick = false;
         self.human_old_stack_card = None;
+        self.complete_turn();
     }
 
-    fn drive_round_internal(&mut self, mut events: Vec<GameEvent>) -> DriveReport {
+    fn drive_round_step(&mut self, mut events: Vec<GameEvent>) -> DriveReport {
+        if self.pending_new_round {
+            self.pending_new_round = false;
+            self.start_round_internal(&mut events);
+        }
+
         loop {
             self.update_round_scores();
 
             if self.detect_stop_bus(&mut events) {
                 match self.finish_round(&mut events) {
-                    FinishResult::Continue => continue,
+                    FinishResult::Continue => {
+                        return DriveReport {
+                            events,
+                            awaiting_human: false,
+                            winner: None,
+                            draw: false,
+                            turn_sequence: Vec::new(),
+                        };
+                    }
                     FinishResult::GameOver { winner, draw } => {
                         return DriveReport {
                             events,
                             awaiting_human: false,
                             winner,
                             draw,
-                        }
+                            turn_sequence: Vec::new(),
+                        };
                     }
                 }
             }
@@ -392,19 +432,29 @@ impl GameState {
                     awaiting_human: false,
                     winner,
                     draw,
+                    turn_sequence: Vec::new(),
                 };
             }
 
             if let Some(stick) = self.stick_player {
                 if self.current_player == stick {
                     match self.finish_round(&mut events) {
-                        FinishResult::Continue => continue,
+                        FinishResult::Continue => {
+                            return DriveReport {
+                                events,
+                                awaiting_human: false,
+                                winner: None,
+                                draw: false,
+                                turn_sequence: Vec::new(),
+                            };
+                        }
                         FinishResult::GameOver { winner, draw } => {
                             return DriveReport {
                                 events,
                                 awaiting_human: false,
                                 winner,
                                 draw,
+                                turn_sequence: Vec::new(),
                             };
                         }
                     }
@@ -423,6 +473,7 @@ impl GameState {
                         awaiting_human: false,
                         winner: None,
                         draw: true,
+                        turn_sequence: Vec::new(),
                     };
                 }
 
@@ -432,6 +483,7 @@ impl GameState {
                     awaiting_human: true,
                     winner: None,
                     draw: false,
+                    turn_sequence: Vec::new(),
                 };
             }
 
@@ -442,14 +494,23 @@ impl GameState {
                 }
 
                 match self.finish_round(&mut events) {
-                    FinishResult::Continue => continue,
+                    FinishResult::Continue => {
+                        return DriveReport {
+                            events,
+                            awaiting_human: false,
+                            winner: None,
+                            draw: false,
+                            turn_sequence: Vec::new(),
+                        };
+                    }
                     FinishResult::GameOver { winner, draw } => {
                         return DriveReport {
                             events,
                             awaiting_human: false,
                             winner,
                             draw,
-                        }
+                            turn_sequence: Vec::new(),
+                        };
                     }
                 }
             }
@@ -461,20 +522,36 @@ impl GameState {
                 self.current_player = next;
             } else {
                 match self.finish_round(&mut events) {
-                    FinishResult::Continue => continue,
+                    FinishResult::Continue => {
+                        return DriveReport {
+                            events,
+                            awaiting_human: false,
+                            winner: None,
+                            draw: false,
+                            turn_sequence: Vec::new(),
+                        };
+                    }
                     FinishResult::GameOver { winner, draw } => {
                         return DriveReport {
                             events,
                             awaiting_human: false,
                             winner,
                             draw,
-                        }
+                            turn_sequence: Vec::new(),
+                        };
                     }
                 }
             }
+
+            return DriveReport {
+                events,
+                awaiting_human: false,
+                winner: None,
+                draw: false,
+                turn_sequence: vec![active],
+            };
         }
     }
-
     fn detect_stop_bus(&mut self, events: &mut Vec<GameEvent>) -> bool {
         for player in 0..PLAYERS {
             if self.lives[player] == 0 {
@@ -520,9 +597,11 @@ impl GameState {
 
         self.stop_player = None;
         self.stick_player = None;
+        self.stick_player_score = None;
         self.awaiting_human = false;
         self.human_can_draw_next = false;
         self.human_can_stick = false;
+        self.round_turns = 0;
         self.human_old_stack_card = None;
 
         let loss_players: Vec<usize> = life_losses.iter().map(|info| info.player).collect();
@@ -599,7 +678,7 @@ impl GameState {
                     };
                     events.push(event);
                 }
-                self.start_round_internal(events);
+                self.pending_new_round = true;
                 FinishResult::Continue
             }
         }
@@ -667,17 +746,48 @@ impl GameState {
         self.update_round_scores();
         let base_score = self.round_scores[player];
 
-        if base_score > 25 && self.stick_player.is_none() {
-            self.stick_player = Some(player);
-            if player != 0 {
-                events.push(GameEvent::info(format!("Player {} sticks.", player + 1)));
-            }
+        if self.stick_player.is_none() && base_score > 25 {
+            self.mark_player_sticking(player, events);
+            self.complete_turn();
             return;
         }
 
-        let stack_card = match self.current_stack_card() {
-            Some(card) => card,
-            None => return,
+        if self.try_swap_for_improvement(player, base_score, true) {
+            self.complete_turn();
+            return;
+        }
+
+        if !self.advance_stack_pointer(events) {
+            self.complete_turn();
+            return;
+        }
+
+        self.update_round_scores();
+        let second_base = self.round_scores[player];
+        let _ = self.try_swap_for_improvement(player, second_base, false);
+
+        self.complete_turn();
+    }
+
+    fn mark_player_sticking(&mut self, player: usize, _events: &mut Vec<GameEvent>) {
+        self.update_round_scores();
+        let score = self.round_scores[player];
+        if !self.can_player_stick(player, score) {
+            return;
+        }
+
+        self.stick_player = Some(player);
+        self.stick_player_score = Some(score);
+    }
+
+    fn try_swap_for_improvement(
+        &mut self,
+        player: usize,
+        base_score: u8,
+        require_gt_six: bool,
+    ) -> bool {
+        let Some(stack_card) = self.current_stack_card() else {
+            return false;
         };
 
         let mut best_slot = None;
@@ -695,45 +805,58 @@ impl GameState {
             }
         }
 
-        if best_score > base_score && best_score > 6 {
+        let improvement = if require_gt_six {
+            best_score > base_score && best_score > 6
+        } else {
+            best_score > base_score
+        };
+
+        if improvement {
             if let Some(slot) = best_slot {
                 self.swap_with_stack(player, slot);
-                return;
+                self.update_round_scores();
+                return true;
             }
         }
 
+        false
+    }
+
+    fn advance_stack_pointer(&mut self, events: &mut Vec<GameEvent>) -> bool {
         if self.stack_index + 1 >= DECK_SIZE {
             events.push(GameEvent::alert("Deck overflow.".to_string()));
-            return;
+            return false;
         }
 
         self.stack_index += 1;
+        true
+    }
 
-        let stack_card = match self.current_stack_card() {
-            Some(card) => card,
-            None => return,
-        };
-
-        let mut post_best_slot = None;
-        let mut post_best_score = base_score;
-
-        for slot in 0..HAND_SIZE {
-            if let Some(_) = self.hands[player][slot] {
-                let mut temp = self.hands[player];
-                temp[slot] = Some(stack_card);
-                let score = hand_max_score(&temp);
-                if score > post_best_score {
-                    post_best_score = score;
-                    post_best_slot = Some(slot);
-                }
-            }
+    fn can_player_stick(&self, player: usize, _score: u8) -> bool {
+        if self.finished || self.lives[player] == 0 {
+            return false;
         }
 
-        if post_best_score > base_score {
-            if let Some(slot) = post_best_slot {
-                self.swap_with_stack(player, slot);
-            }
+        match self.stick_player {
+            Some(current) => current == player,
+            None => true,
         }
+    }
+
+    fn complete_turn(&mut self) {
+        self.round_turns = self.round_turns.saturating_add(1);
+    }
+
+    fn refresh_human_stick_flag(&mut self) {
+        if !self.awaiting_human || self.lives[0] == 0 {
+            self.human_can_stick = false;
+            return;
+        }
+
+        self.update_round_scores();
+        let stack_matches_old = self.human_old_stack_card == self.current_stack_card();
+        let allowed = stack_matches_old && self.stick_player.is_none();
+        self.human_can_stick = allowed;
     }
 
     fn current_stack_card(&self) -> Option<CardId> {
