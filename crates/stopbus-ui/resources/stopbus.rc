@@ -1,0 +1,126 @@
+#include <windows.h>
+
+#define ICON_1 100
+#define APP_ICON 102
+
+// Card face bitmaps (1-52)
+1 BITMAP "cards/card01.bmp"
+2 BITMAP "cards/card02.bmp"
+3 BITMAP "cards/card03.bmp"
+4 BITMAP "cards/card04.bmp"
+5 BITMAP "cards/card05.bmp"
+6 BITMAP "cards/card06.bmp"
+7 BITMAP "cards/card07.bmp"
+8 BITMAP "cards/card08.bmp"
+9 BITMAP "cards/card09.bmp"
+10 BITMAP "cards/card10.bmp"
+11 BITMAP "cards/card11.bmp"
+12 BITMAP "cards/card12.bmp"
+13 BITMAP "cards/card13.bmp"
+14 BITMAP "cards/card14.bmp"
+15 BITMAP "cards/card15.bmp"
+16 BITMAP "cards/card16.bmp"
+17 BITMAP "cards/card17.bmp"
+18 BITMAP "cards/card18.bmp"
+19 BITMAP "cards/card19.bmp"
+20 BITMAP "cards/card20.bmp"
+21 BITMAP "cards/card21.bmp"
+22 BITMAP "cards/card22.bmp"
+23 BITMAP "cards/card23.bmp"
+24 BITMAP "cards/card24.bmp"
+25 BITMAP "cards/card25.bmp"
+26 BITMAP "cards/card26.bmp"
+27 BITMAP "cards/card27.bmp"
+28 BITMAP "cards/card28.bmp"
+29 BITMAP "cards/card29.bmp"
+30 BITMAP "cards/card30.bmp"
+31 BITMAP "cards/card31.bmp"
+32 BITMAP "cards/card32.bmp"
+33 BITMAP "cards/card33.bmp"
+34 BITMAP "cards/card34.bmp"
+35 BITMAP "cards/card35.bmp"
+36 BITMAP "cards/card36.bmp"
+37 BITMAP "cards/card37.bmp"
+38 BITMAP "cards/card38.bmp"
+39 BITMAP "cards/card39.bmp"
+40 BITMAP "cards/card40.bmp"
+41 BITMAP "cards/card41.bmp"
+42 BITMAP "cards/card42.bmp"
+43 BITMAP "cards/card43.bmp"
+44 BITMAP "cards/card44.bmp"
+45 BITMAP "cards/card45.bmp"
+46 BITMAP "cards/card46.bmp"
+47 BITMAP "cards/card47.bmp"
+48 BITMAP "cards/card48.bmp"
+49 BITMAP "cards/card49.bmp"
+50 BITMAP "cards/card50.bmp"
+51 BITMAP "cards/card51.bmp"
+52 BITMAP "cards/card52.bmp"
+
+// Card back and empty-slot overlay
+53 BITMAP "cards/card53.bmp"
+54 BITMAP "cards/card54.bmp"
+
+// Icons
+ICON_1 ICON "..\\..\\..\\MD.ICO"
+APP_ICON ICON "..\\..\\..\\assets\\original-icons\\icon_001.ico"
+
+// Options dialog
+OPTIONS DIALOGEX 20, 20, 170, 120
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Options"
+FONT 9, "MS Shell Dlg"
+BEGIN
+    CONTROL "Show cheat &cards", 500, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP | WS_VISIBLE | WS_CHILD, 12, 12, 140, 10
+    CONTROL "Show cheat &deck", 501, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP | WS_VISIBLE | WS_CHILD, 12, 28, 140, 10
+    CONTROL "Show cheat &scores", 502, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP | WS_VISIBLE | WS_CHILD, 12, 44, 140, 10
+    CONTROL "&Save on exit", 503, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP | WS_VISIBLE | WS_CHILD, 12, 60, 140, 10
+    DEFPUSHBUTTON "OK", IDOK, 50, 90, 50, 14, WS_TABSTOP
+    PUSHBUTTON "Cancel", IDCANCEL, 110, 90, 50, 14, WS_TABSTOP
+END
+
+// About dialog
+ABOUTBOX DIALOGEX 30, 30, 200, 150
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About Stop the Bus"
+FONT 9, "MS Shell Dlg"
+BEGIN
+    ICON ICON_1, -1, 10, 10, 16, 16
+    LTEXT "Stop the Bus", 550, 36, 12, 120, 10
+    LTEXT "Copyright (c) Martin Davidson - 1993", 551, 36, 26, 150, 10
+    LTEXT "Version 2.0.0", 554, 36, 40, 120, 10
+    LTEXT "Released: 09/05/1993", 555, 36, 52, 120, 10
+    CTEXT "Modernization build information:", -1, 10, 72, 180, 10
+    CTEXT "", 552, 10, 84, 180, 10
+    CTEXT "", 553, 10, 96, 180, 10
+    LTEXT "", 556, 36, 112, 150, 28
+    DEFPUSHBUTTON "OK", IDOK, 75, 130, 50, 14, WS_TABSTOP
+END
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 2,0,0,0
+ PRODUCTVERSION 2,0,0,0
+ FILEFLAGSMASK 0x3FL
+ FILEFLAGS 0x0L
+ FILEOS 0x00040004L
+ FILETYPE 0x00000001L
+ FILESUBTYPE 0x00000000L
+{
+ BLOCK "StringFileInfo"
+ {
+  BLOCK "040904B0"
+  {
+   VALUE "CompanyName", "Maintained by the community"
+   VALUE "FileDescription", "Stop the Bus game modernization"
+   VALUE "FileVersion", "2.0.0"
+   VALUE "InternalName", "stopbus.exe"
+   VALUE "LegalCopyright", "Copyright (c) 1993-2025"
+   VALUE "OriginalFilename", "stopbus.exe"
+   VALUE "ProductName", "Stop the Bus"
+   VALUE "ProductVersion", "2.0.0"
+  }
+ }
+ BLOCK "VarFileInfo"
+ {
+  VALUE "Translation", 0x0409, 1200
+ }
+}
