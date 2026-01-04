@@ -2331,7 +2331,7 @@ fn create_dib_from_resource(data: &[u8]) -> Result<HBITMAP> {
         return Err(Error::from_win32());
     }
 
-    let stride = ((width.unsigned_abs() as usize * bit_count + 31) / 32) * 4;
+    let stride = (width.unsigned_abs() as usize * bit_count).div_ceil(32) * 4;
 
     let bits = &data[bits_offset..];
 
